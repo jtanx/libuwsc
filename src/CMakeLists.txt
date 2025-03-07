@@ -48,4 +48,11 @@ install(
         include/uwsc
 )
 
+install(
+    TARGETS uwsc
+    LIBRARY
+    DESTINATION
+        ${CMAKE_INSTALL_LIBDIR}
+)
+
 message(STATUS "UWSC_VERSION: ${UWSC_VERSION_MAJOR}.${UWSC_VERSION_MINOR}.${UWSC_VERSION_PATCH}")
