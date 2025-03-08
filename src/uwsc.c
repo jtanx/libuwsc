@@ -158,23 +158,29 @@ static bool dispatch_message(struct uwsc_client *cl)
             return false;
         }
         buffer_put_data(&cl->frag_buf, payload, frame->payloadlen);
+    } else if (!frame->fin) {
+        assert(buffer_length(&cl->frag_buf) == 0);
+        assert(!cl->fragmenting);
+
+        buffer_put_data(&cl->frag_buf, payload, frame->payloadlen);
+        cl->fragmenting = true;
+        cl->frag_opcode = frame->opcode;
     } else {
-        if (frame->fin) {
+        if (frame->opcode == UWSC_OP_PONG) {
+            if (unlikely(cl->fragmenting)) {
+                uwsc_error(cl, UWSC_ERROR_IO, "Fragmented pong unsupported");
+                return false;
+            }
+            cl->wait_pong = false;
+        } else if (cl->fragmenting) {
+            if (cl->onmessage)
+                cl->onmessage(cl, buffer_data(&cl->frag_buf), buffer_length(&cl->frag_buf), cl->frag_opcode == UWSC_OP_BINARY);
+            buffer_pull(&cl->frag_buf, NULL, buffer_length(&cl->frag_buf));
+            cl->fragmenting = false;
+        } else {
             if (cl->onmessage)
                 cl->onmessage(cl, payload, frame->payloadlen, frame->opcode == UWSC_OP_BINARY);
-        } else {
-            assert(buffer_length(&cl->frag_buf) == 0);
-            buffer_put_data(&cl->frag_buf, payload, frame->payloadlen);
-            cl->fragmenting = true;
-            cl->frag_opcode = frame->opcode;
         }
-    }
-
-    if (frame->fin && cl->fragmenting) {
-        if (cl->onmessage)
-            cl->onmessage(cl, buffer_data(&cl->frag_buf), buffer_length(&cl->frag_buf), cl->frag_opcode == UWSC_OP_BINARY);
-        buffer_pull(&cl->frag_buf, NULL, buffer_length(&cl->frag_buf));
-        cl->fragmenting = false;
     }
 
     buffer_pull(&cl->rb, NULL, frame->payloadlen);
@@ -607,7 +613,6 @@ static void uwsc_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
         if (now - cl->last_ping < 5)
             return;
 
-        cl->wait_pong = false;
         ++cl->ntimeout;
         log_debug("ping timeout %d\n", cl->ntimeout);
         if (cl->ntimeout > 2) {
