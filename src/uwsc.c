@@ -621,7 +621,8 @@ static void uwsc_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
             return;
 
         cl->wait_pong = false;
-        log_err("ping timeout %d\n", ++cl->ntimeout);
+        ++cl->ntimeout;
+        log_debug("ping timeout %d\n", cl->ntimeout);
         if (cl->ntimeout > 2) {
             uwsc_error(cl, UWSC_ERROR_PING_TIMEOUT, "ping timeout");
             return;
