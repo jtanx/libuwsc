@@ -152,26 +152,27 @@ static bool dispatch_message(struct uwsc_client *cl)
         return false;
 
     // Handle fragmented messages
-    if (frame->opcode == UWSC_OP_CONTINUE) {
-        if (!cl->fragmenting) {
+    if (!frame->fin) {
+        if (frame->opcode != UWSC_OP_CONTINUE) {
+            assert(buffer_length(&cl->frag_buf) == 0);
+            assert(!cl->fragmenting);
+            cl->fragmenting = true;
+            cl->frag_opcode = frame->opcode;
+        } else if (!cl->fragmenting) {
             uwsc_error(cl, UWSC_ERROR_IO, "Unexpected continuation frame");
             return false;
         }
-        buffer_put_data(&cl->frag_buf, payload, frame->payloadlen);
-    } else if (!frame->fin) {
-        assert(buffer_length(&cl->frag_buf) == 0);
-        assert(!cl->fragmenting);
 
         buffer_put_data(&cl->frag_buf, payload, frame->payloadlen);
-        cl->fragmenting = true;
-        cl->frag_opcode = frame->opcode;
     } else {
-        if (frame->opcode == UWSC_OP_PONG) {
-            if (unlikely(cl->fragmenting)) {
-                uwsc_error(cl, UWSC_ERROR_IO, "Fragmented pong unsupported");
-                return false;
+        if (frame->opcode == UWSC_OP_PONG || frame->opcode == UWSC_OP_PING) {
+            if (frame->opcode == UWSC_OP_PONG) {
+                log_debug("got pong\n");
+                cl->wait_pong = false;
+            } else {
+                log_debug("got ping, send pong\n");
+                cl->send(cl, payload, frame->payloadlen, UWSC_OP_PONG);
             }
-            cl->wait_pong = false;
         } else if (cl->fragmenting) {
             if (cl->onmessage)
                 cl->onmessage(cl, buffer_data(&cl->frag_buf), buffer_length(&cl->frag_buf), cl->frag_opcode == UWSC_OP_BINARY);
@@ -558,6 +559,7 @@ int uwsc_send_ex(struct uwsc_client *cl, int op, int num, ...)
 static inline void uwsc_ping(struct uwsc_client *cl)
 {
     const char *msg = "libuwsc";
+    log_debug("send ping\n");
     cl->send(cl, msg, strlen(msg), UWSC_OP_PING);
 }
 
