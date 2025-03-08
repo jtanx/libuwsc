@@ -22,6 +22,7 @@
  * SOFTWARE.
  */
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -50,6 +51,7 @@ static void uwsc_free(struct uwsc_client *cl)
     ev_io_stop(cl->loop, &cl->iow);
     buffer_free(&cl->rb);
     buffer_free(&cl->wb);
+    buffer_free(&cl->frag_buf);
 
 #ifdef SSL_SUPPORT
     ssl_session_free(cl->ssl);
@@ -88,20 +90,13 @@ static bool parse_header(struct uwsc_client *cl)
     struct uwsc_frame *frame = &cl->frame;
     struct buffer *rb = &cl->rb;
     uint8_t head, len;
-    bool fin;
 
     if (buffer_length(rb) < 2)
         return false;
 
     head = buffer_pull_u8(rb);
-
-    fin = (head & 0x80) ? true : false;
+    frame->fin = (head & 0x80) ? true : false;
     frame->opcode = head & 0x0F;
-
-    if (!fin || frame->opcode == UWSC_OP_CONTINUE) {
-        uwsc_error(cl, UWSC_ERROR_NOT_SUPPORT, "Not support fragment");
-        return false;
-    }
 
     len = buffer_pull_u8(rb);
     if (len & 0x80) {
@@ -147,7 +142,7 @@ static bool parse_paylen(struct uwsc_client *cl)
     return true;
 }
 
-static bool dispach_message(struct uwsc_client *cl)
+static bool dispatch_message(struct uwsc_client *cl)
 {
     struct buffer *rb = &cl->rb;
     struct uwsc_frame *frame = &cl->frame;
@@ -156,38 +151,30 @@ static bool dispach_message(struct uwsc_client *cl)
     if (buffer_length(rb) < frame->payloadlen)
         return false;
 
-    switch (frame->opcode) {
-    case UWSC_OP_TEXT:
-    case UWSC_OP_BINARY:
+    // Handle fragmented messages
+    if (frame->opcode == UWSC_OP_CONTINUE) {
+        if (!cl->fragmenting) {
+            uwsc_error(cl, UWSC_ERROR_IO, "Unexpected continuation frame");
+            return false;
+        }
+        buffer_put_data(&cl->frag_buf, payload, frame->payloadlen);
+    } else {
+        if (frame->fin) {
+            if (cl->onmessage)
+                cl->onmessage(cl, payload, frame->payloadlen, frame->opcode == UWSC_OP_BINARY);
+        } else {
+            assert(buffer_length(&cl->frag_buf) == 0);
+            buffer_put_data(&cl->frag_buf, payload, frame->payloadlen);
+            cl->fragmenting = true;
+            cl->frag_opcode = frame->opcode;
+        }
+    }
+
+    if (frame->fin && cl->fragmenting) {
         if (cl->onmessage)
-            cl->onmessage(cl, payload, frame->payloadlen, frame->opcode == UWSC_OP_BINARY);
-        break;
-
-    case UWSC_OP_PING:
-        cl->send(cl, payload, frame->payloadlen, UWSC_OP_PONG);
-        break;
-
-    case UWSC_OP_PONG:
-        cl->wait_pong = false;
-        break;
-
-    case UWSC_OP_CLOSE:
-            if (cl->onclose) {
-                int code = buffer_pull_u16(&cl->rb);
-                char reason[128] = "";
-
-                frame->payloadlen -= 2;
-                buffer_pull(&cl->rb, reason, frame->payloadlen);
-                cl->onclose(cl, ntohs(code), reason);
-            }
-
-            uwsc_free(cl);
-        break;
-
-    default:
-        log_err("unknown opcode - %d\n", frame->opcode);
-        uwsc_send_close(cl, UWSC_CLOSE_STATUS_PROTOCOL_ERR, "unknown opcode");
-        break;
+            cl->onmessage(cl, buffer_data(&cl->frag_buf), buffer_length(&cl->frag_buf), cl->frag_opcode == UWSC_OP_BINARY);
+        buffer_pull(&cl->frag_buf, NULL, buffer_length(&cl->frag_buf));
+        cl->fragmenting = false;
     }
 
     buffer_pull(&cl->rb, NULL, frame->payloadlen);
@@ -206,7 +193,7 @@ static bool parse_frame(struct uwsc_client *cl)
         if (!parse_paylen(cl))
             return false;
     case CLIENT_STATE_PARSE_MSG_PAYLOAD:
-        if (!dispach_message(cl))
+        if (!dispatch_message(cl))
             return false;
     default:
         break;

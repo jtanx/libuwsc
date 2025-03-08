@@ -84,6 +84,7 @@ enum {
 
 struct uwsc_frame {
     uint8_t opcode;
+    bool fin;
     size_t payloadlen;
 };
 
@@ -95,9 +96,12 @@ struct uwsc_client {
     struct ev_io iow;
     struct buffer rb;
     struct buffer wb;
+    struct buffer frag_buf;
     struct uwsc_frame frame;
     struct ev_timer timer;
     bool wait_pong;
+    bool fragmenting;
+    uint8_t frag_opcode;
     int ping_interval;
     ev_tstamp start_time;   /* Time stamp of begin connect */
     ev_tstamp last_ping;    /* Time stamp of last ping */
