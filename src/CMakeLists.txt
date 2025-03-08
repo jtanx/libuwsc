@@ -30,7 +30,7 @@ else()
     set_target_properties(uwsc PROPERTIES VERSION ${UWSC_VERSION_MAJOR}.${UWSC_VERSION_MINOR}.${UWSC_VERSION_PATCH})
 endif()
 
-target_include_directories(uwsc PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${LIBEV_INCLUDE_DIR} buffer log)
+target_include_directories(uwsc PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${LIBEV_INCLUDE_DIR} buffer log)
 
 # configure a header file to pass some of the CMake settings to the source code
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
