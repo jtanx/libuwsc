@@ -472,6 +472,9 @@ static void uwsc_io_write_cb(struct ev_loop *loop, struct ev_io *w, int revents)
         }
     }
 
+    if (cl->onwrite && buffer_length(&cl->wb) <= cl->wb_limit)
+        cl->onwrite(cl);
+
     if (buffer_length(&cl->wb) < 1)
         ev_io_stop(loop, w);
 }

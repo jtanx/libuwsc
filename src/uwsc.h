@@ -103,6 +103,7 @@ struct uwsc_client {
     bool fragmenting;
     uint8_t frag_opcode;
     int ping_interval;
+    size_t wb_limit;
     ev_tstamp start_time;   /* Time stamp of begin connect */
     ev_tstamp last_ping;    /* Time stamp of last ping */
     int ntimeout;           /* Number of timeouts */
@@ -114,6 +115,7 @@ struct uwsc_client {
     void (*onmessage)(struct uwsc_client *cl, void *data, size_t len, bool binary);
     void (*onerror)(struct uwsc_client *cl, int err, const char *msg);
     void (*onclose)(struct uwsc_client *cl, int code, const char *reason);
+    void (*onwrite)(struct uwsc_client* cl);
 
     int (*send)(struct uwsc_client *cl, const void *data, size_t len, int op);
     int (*send_ex)(struct uwsc_client *cl, int op, int num, ...);
